@@ -8,7 +8,6 @@ import { HostProvider } from "../../../hosts/host-provider"
 import { HookOutput } from "../../../shared/proto/cline/hooks"
 import { setVscodeHostProviderMock } from "../../../test/host-provider-test-utils"
 import * as diskModule from "../../storage/disk"
-import { StateManager } from "../../storage/StateManager"
 import { HookDiscoveryCache } from "../HookDiscoveryCache"
 import { HookFactory, Hooks, NamedHookInput } from "../hook-factory"
 
@@ -83,6 +82,16 @@ function restoreHookDirsSpy(): void {
 	hooksDirsSpy = undefined
 }
 
+/**
+ * Stubs HostProvider.workspace so hook discovery and hook input metadata
+ * resolve the given paths as this window's workspace roots.
+ */
+export function stubWorkspacePaths(sandbox: sinon.SinonSandbox, paths: string[]): void {
+	sandbox.stub(HostProvider, "workspace").get(() => ({
+		getWorkspacePaths: async () => ({ paths }),
+	}))
+}
+
 export async function createHookTestEnv(): Promise<HookTestEnv> {
 	// Hook execution emits telemetry, which lazily constructs TelemetryService
 	// via HostProvider.env.getHostVersion(). Under mocha's single-process run an
@@ -97,17 +106,7 @@ export async function createHookTestEnv(): Promise<HookTestEnv> {
 	const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "hook-test-"))
 	const hooksDir = await createHooksDirectory(tempDir)
 
-	sandbox.stub(StateManager, "get").returns({
-		getGlobalStateKey: (key: string) => {
-			if (key === "workspaceRoots") {
-				return [{ path: tempDir }]
-			}
-			if (key === "primaryRootIndex") {
-				return 0
-			}
-			return undefined
-		},
-	} as any)
+	stubWorkspacePaths(sandbox, [tempDir])
 
 	resetHookCache()
 	stubHookDirs(sandbox, [hooksDir])

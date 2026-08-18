@@ -49,14 +49,9 @@ describe("Hook Management", () => {
 			},
 		} as any
 
-		// Mock StateManager to return test workspace
+		// Mock StateManager (workspace identity comes from HostProvider below)
 		stateManagerStub = sinon.stub(StateManager, "get").returns({
-			getGlobalStateKey: (key: string) => {
-				if (key === "workspaceRoots") {
-					return [{ path: path.join(tempDir, "workspace") }]
-				}
-				return undefined
-			},
+			getGlobalStateKey: () => undefined,
 		} as any)
 
 		// Mock HostProvider.workspace.getWorkspacePaths - need to stub the method directly

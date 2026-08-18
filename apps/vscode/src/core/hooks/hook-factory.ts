@@ -18,8 +18,8 @@ import {
 	TaskStartData,
 	UserPromptSubmitData,
 } from "../../shared/proto/cline/hooks"
+import { HostProvider } from "@/hosts/host-provider"
 import { getAllHooksDirs } from "../storage/disk"
-import { StateManager } from "../storage/StateManager"
 import { HookExecutionError } from "./HookError"
 import { HookProcess } from "./HookProcess"
 
@@ -196,10 +196,10 @@ export abstract class HookRunner<Name extends HookName> {
 	 * @returns Complete HookInput ready to be serialized and sent to the hook script
 	 */
 	protected async completeParams(params: NamedHookInput<Name>): Promise<HookInput> {
-		const workspaceRoots =
-			StateManager.get()
-				.getGlobalStateKey("workspaceRoots")
-				?.map((root) => root.path) || []
+		// Resolve workspace identity from this window's host rather than global
+		// state, which is shared across every Cline instance and may describe
+		// another window's project.
+		const workspaceRoots = (await HostProvider.workspace.getWorkspacePaths({})).paths
 
 		const model: HookModelContext = {
 			provider: params.model?.provider?.trim() || "unknown",
@@ -793,11 +793,10 @@ export class HookFactory {
 			)
 		}
 
-		// Get workspace roots for cwd determination
-		const stateManager = StateManager.get()
-		const workspaceRoots = stateManager.getGlobalStateKey("workspaceRoots")
-		const primaryRootIndex = stateManager.getGlobalStateKey("primaryRootIndex") ?? 0
-		const primaryCwd = workspaceRoots?.[primaryRootIndex]?.path
+		// Get this window's workspace roots for cwd determination. The first
+		// workspace folder is the primary root.
+		const workspaceRoots = (await HostProvider.workspace.getWorkspacePaths({})).paths
+		const primaryCwd = workspaceRoots[0]
 
 		// Create runners with source and cwd determination for each script
 		// Global hooks run from primary workspace root
@@ -844,14 +843,14 @@ export class HookFactory {
 	 *
 	 * @param scriptPath The full path to the hook script
 	 * @param hooksDirs Array of all hooks directories
-	 * @param workspaceRoots Array of workspace root objects
+	 * @param workspaceRoots Array of workspace root paths
 	 * @param primaryCwd The primary workspace root path (fallback)
 	 * @returns The working directory to use for this hook
 	 */
 	private determineHookCwd(
 		scriptPath: string,
 		hooksDirs: string[],
-		workspaceRoots: Array<{ path: string }> | undefined,
+		workspaceRoots: string[],
 		primaryCwd: string | undefined,
 	): string | undefined {
 		const containingDir = hooksDirs.find((dir) => scriptPath.startsWith(dir))
@@ -864,10 +863,10 @@ export class HookFactory {
 		// If workspace hook, find which workspace root it belongs to
 		// Workspace hooks are at: workspaceRoot/.clinerules/hooks/
 		// So find the workspace root whose path is a prefix of the containing hooks dir
-		if (containingDir && workspaceRoots) {
-			const workspaceRoot = workspaceRoots.find((root) => containingDir.startsWith(root.path))
+		if (containingDir) {
+			const workspaceRoot = workspaceRoots.find((root) => containingDir.startsWith(root))
 			if (workspaceRoot) {
-				return workspaceRoot.path
+				return workspaceRoot
 			}
 		}
 

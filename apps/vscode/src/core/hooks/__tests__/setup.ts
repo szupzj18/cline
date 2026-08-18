@@ -3,8 +3,7 @@ import * as fs from "fs/promises"
 import * as os from "os"
 import * as path from "path"
 import sinon from "sinon"
-import { StateManager } from "../../storage/StateManager"
-import { createHooksDirectory } from "./test-utils"
+import { createHooksDirectory, stubWorkspacePaths } from "./test-utils"
 
 /**
  * Test environment containing temp directories and cleanup functions.
@@ -78,8 +77,8 @@ export function setupHookTests(): {
 		sandbox = sinon.createSandbox()
 		env = await createHookTestEnvironment()
 
-		// Mock StateManager to return test workspace
-		mockStateManager(sandbox, [env.tempDir])
+		// Resolve the test workspace as this window's workspace root
+		stubWorkspacePaths(sandbox, [env.tempDir])
 	})
 
 	afterEach(async () => {
@@ -95,23 +94,4 @@ export function setupHookTests(): {
 			return env
 		},
 	}
-}
-
-/**
- * Mocks StateManager to return test workspace roots.
- * Useful for testing hook discovery across multiple workspace roots.
- *
- * @param sandbox Sinon sandbox for cleanup
- * @param workspaceRoots Array of workspace root paths
- *
- * @example
- * const sandbox = sinon.createSandbox()
- * mockStateManager(sandbox, ["/path/to/workspace1", "/path/to/workspace2"])
- * // StateManager.get().getGlobalStateKey("workspaceRoots") now returns mocked roots
- * sandbox.restore() // Clean up after tests
- */
-export function mockStateManager(sandbox: sinon.SinonSandbox, workspaceRoots: string[]): void {
-	sandbox.stub(StateManager, "get").returns({
-		getGlobalStateKey: () => workspaceRoots.map((rootPath) => ({ path: rootPath })),
-	} as any)
 }

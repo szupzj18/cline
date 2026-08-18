@@ -9,7 +9,6 @@ import * as path from "path"
 import { HostProvider } from "@/hosts/host-provider"
 import { Logger } from "@/shared/services/Logger"
 import { getDocumentsPath } from "./documents-path"
-import { StateManager } from "./StateManager"
 
 export { getDocumentsPath } from "./documents-path"
 
@@ -325,10 +324,10 @@ export async function getAllHooksDirs(): Promise<string[]> {
  * multi-root workspace may have multiple hooks directories.
  */
 export async function getWorkspaceHooksDirs(): Promise<string[]> {
-	const workspaceRootPaths =
-		StateManager.get()
-			.getGlobalStateKey("workspaceRoots")
-			?.map((root) => root.path) || []
+	// Workspace identity must come from this window's host, not global state:
+	// ~/.cline global state is shared across every Cline instance, so a
+	// persisted workspaceRoots value can point at another window's project.
+	const workspaceRootPaths = (await HostProvider.workspace.getWorkspacePaths({})).paths
 
 	return (
 		await Promise.all(
