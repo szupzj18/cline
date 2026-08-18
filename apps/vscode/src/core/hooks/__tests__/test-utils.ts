@@ -6,7 +6,7 @@ import should from "should"
 import sinon from "sinon"
 import { HostProvider } from "../../../hosts/host-provider"
 import { HookOutput } from "../../../shared/proto/cline/hooks"
-import { setVscodeHostProviderMock } from "../../../test/host-provider-test-utils"
+import { setVscodeHostProviderMock, stubWorkspacePaths } from "../../../test/host-provider-test-utils"
 import * as diskModule from "../../storage/disk"
 import { HookDiscoveryCache } from "../HookDiscoveryCache"
 import { HookFactory, Hooks, NamedHookInput } from "../hook-factory"
@@ -80,16 +80,6 @@ export function stubHookDirs(_sandbox: sinon.SinonSandbox, dirs: string[]): Retu
 function restoreHookDirsSpy(): void {
 	hooksDirsSpy?.mockRestore()
 	hooksDirsSpy = undefined
-}
-
-/**
- * Stubs HostProvider.workspace so hook discovery and hook input metadata
- * resolve the given paths as this window's workspace roots.
- */
-export function stubWorkspacePaths(sandbox: sinon.SinonSandbox, paths: string[]): void {
-	sandbox.stub(HostProvider, "workspace").get(() => ({
-		getWorkspacePaths: async () => ({ paths }),
-	}))
 }
 
 export async function createHookTestEnv(): Promise<HookTestEnv> {

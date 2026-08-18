@@ -18,8 +18,7 @@ import {
 	TaskStartData,
 	UserPromptSubmitData,
 } from "../../shared/proto/cline/hooks"
-import { HostProvider } from "@/hosts/host-provider"
-import { getAllHooksDirs } from "../storage/disk"
+import { getAllHooksDirs, getWindowWorkspaceRoots } from "../storage/disk"
 import { HookExecutionError } from "./HookError"
 import { HookProcess } from "./HookProcess"
 
@@ -163,7 +162,15 @@ const exec = Symbol()
  * - Results are immediately consumed and added to the conversation context
  */
 export abstract class HookRunner<Name extends HookName> {
-	constructor(public readonly hookName: Name) {}
+	/**
+	 * @param workspaceRoots This window's workspace root paths, resolved when
+	 * the runner was created. Kept alongside the runner so hook input metadata
+	 * matches the roots used for discovery and cwd selection.
+	 */
+	constructor(
+		public readonly hookName: Name,
+		protected readonly workspaceRoots?: string[],
+	) {}
 
 	/**
 	 * Execute the hook with the given parameters.
@@ -196,10 +203,7 @@ export abstract class HookRunner<Name extends HookName> {
 	 * @returns Complete HookInput ready to be serialized and sent to the hook script
 	 */
 	protected async completeParams(params: NamedHookInput<Name>): Promise<HookInput> {
-		// Resolve workspace identity from this window's host rather than global
-		// state, which is shared across every Cline instance and may describe
-		// another window's project.
-		const workspaceRoots = (await HostProvider.workspace.getWorkspacePaths({})).paths
+		const workspaceRoots = this.workspaceRoots ?? (await getWindowWorkspaceRoots())
 
 		const model: HookModelContext = {
 			provider: params.model?.provider?.trim() || "unknown",
@@ -282,8 +286,9 @@ class StdioHookRunner<Name extends HookName> extends HookRunner<Name> {
 		private readonly taskId?: string,
 		private readonly toolName?: string,
 		private readonly cwd?: string,
+		workspaceRoots?: string[],
 	) {
-		super(hookName)
+		super(hookName, workspaceRoots)
 	}
 
 	override async [exec](input: HookInput): Promise<HookOutput> {
@@ -652,8 +657,9 @@ class CombinedHookRunner<Name extends HookName> extends HookRunner<Name> {
 	constructor(
 		hookName: Name,
 		private readonly runners: readonly HookRunner<Name>[],
+		workspaceRoots?: string[],
 	) {
-		super(hookName)
+		super(hookName, workspaceRoots)
 	}
 
 	override async [exec](input: HookInput): Promise<HookOutput> {
@@ -715,6 +721,19 @@ function isExpectedHookError(error: unknown): boolean {
 
 	// All other errors (EIO, EMFILE, etc.) are unexpected and should be propagated
 	return false
+}
+
+/**
+ * True when `child` is the same path as `parent` or inside it. A plain
+ * startsWith check would treat /a/b as containing /a/bc, so require the match
+ * to end on a whole path segment.
+ */
+export function isPathWithin(parent: string, child: string): boolean {
+	if (child === parent) {
+		return true
+	}
+	const prefix = parent.endsWith(path.sep) ? parent : parent + path.sep
+	return child.startsWith(prefix)
 }
 
 export class HookFactory {
@@ -780,8 +799,13 @@ export class HookFactory {
 		const { HookDiscoveryCache } = await import("./HookDiscoveryCache")
 		const scripts = await HookDiscoveryCache.getInstance().get(hookName)
 
+		// Resolve this window's workspace roots once, then reuse the same set
+		// for hooks-dir discovery, cwd selection, and hook input metadata so
+		// they can't disagree. The first workspace folder is the primary root.
+		const workspaceRoots = await getWindowWorkspaceRoots()
+
 		// Fetch hooks dirs once for source determination and telemetry
-		const hooksDirs = await getAllHooksDirs()
+		const hooksDirs = await getAllHooksDirs(workspaceRoots)
 
 		// Capture hook discovery telemetry
 		// Categorize scripts by location (global vs workspace)
@@ -793,24 +817,29 @@ export class HookFactory {
 			)
 		}
 
-		// Get this window's workspace roots for cwd determination. The first
-		// workspace folder is the primary root.
-		const workspaceRoots = (await HostProvider.workspace.getWorkspacePaths({})).paths
-		const primaryCwd = workspaceRoots[0]
-
 		// Create runners with source and cwd determination for each script
 		// Global hooks run from primary workspace root
 		// Workspace-specific hooks run from their respective workspace root
 		const runners = scripts.map((script) => {
 			const source = this.determineScriptSource(script, hooksDirs)
-			const cwd = this.determineHookCwd(script, hooksDirs, workspaceRoots, primaryCwd)
-			return new StdioHookRunner(hookName, script, source, streamCallback, abortSignal, taskId, toolName, cwd)
+			const cwd = this.determineHookCwd(script, hooksDirs, workspaceRoots)
+			return new StdioHookRunner(
+				hookName,
+				script,
+				source,
+				streamCallback,
+				abortSignal,
+				taskId,
+				toolName,
+				cwd,
+				workspaceRoots,
+			)
 		})
 
 		if (runners.length === 0) {
-			return new NoOpRunner(hookName)
+			return new NoOpRunner(hookName, workspaceRoots)
 		}
-		return runners.length === 1 ? runners[0] : new CombinedHookRunner(hookName, runners)
+		return runners.length === 1 ? runners[0] : new CombinedHookRunner(hookName, runners, workspaceRoots)
 	}
 
 	/**
@@ -825,7 +854,7 @@ export class HookFactory {
 	 * Determines if a single script is from global or workspace location
 	 */
 	private determineScriptSource(scriptPath: string, hooksDirs: string[]): "global" | "workspace" {
-		const containingDir = hooksDirs.find((dir) => scriptPath.startsWith(dir))
+		const containingDir = hooksDirs.find((dir) => isPathWithin(dir, scriptPath))
 		if (containingDir && HookFactory.isGlobalHooksDir(containingDir)) {
 			return "global"
 		}
@@ -843,35 +872,29 @@ export class HookFactory {
 	 *
 	 * @param scriptPath The full path to the hook script
 	 * @param hooksDirs Array of all hooks directories
-	 * @param workspaceRoots Array of workspace root paths
-	 * @param primaryCwd The primary workspace root path (fallback)
+	 * @param workspaceRoots Array of workspace root paths; the first entry is
+	 * the primary root
 	 * @returns The working directory to use for this hook
 	 */
-	private determineHookCwd(
-		scriptPath: string,
-		hooksDirs: string[],
-		workspaceRoots: string[],
-		primaryCwd: string | undefined,
-	): string | undefined {
-		const containingDir = hooksDirs.find((dir) => scriptPath.startsWith(dir))
+	private determineHookCwd(scriptPath: string, hooksDirs: string[], workspaceRoots: string[]): string | undefined {
+		const containingDir = hooksDirs.find((dir) => isPathWithin(dir, scriptPath))
 
-		// If global hook, use primary workspace root
-		if (containingDir && HookFactory.isGlobalHooksDir(containingDir)) {
-			return primaryCwd
-		}
-
-		// If workspace hook, find which workspace root it belongs to
-		// Workspace hooks are at: workspaceRoot/.clinerules/hooks/
-		// So find the workspace root whose path is a prefix of the containing hooks dir
-		if (containingDir) {
-			const workspaceRoot = workspaceRoots.find((root) => containingDir.startsWith(root))
+		// If workspace hook, find which workspace root it belongs to.
+		// Workspace hooks are at: workspaceRoot/.clinerules/hooks/. Prefer the
+		// longest matching root so nested workspace roots resolve to the
+		// innermost one.
+		if (containingDir && !HookFactory.isGlobalHooksDir(containingDir)) {
+			const workspaceRoot = [...workspaceRoots]
+				.sort((a, b) => b.length - a.length)
+				.find((root) => isPathWithin(root, containingDir))
 			if (workspaceRoot) {
 				return workspaceRoot
 			}
 		}
 
-		// Fallback to primary cwd
-		return primaryCwd
+		// Global hooks (and any script we can't place) run from the primary
+		// workspace root.
+		return workspaceRoots[0]
 	}
 
 	/**
@@ -892,7 +915,7 @@ export class HookFactory {
 		let workspaceCount = 0
 
 		for (const script of scripts) {
-			const containingDir = hooksDirs.find((dir) => script.startsWith(dir))
+			const containingDir = hooksDirs.find((dir) => isPathWithin(dir, script))
 			if (containingDir && HookFactory.isGlobalHooksDir(containingDir)) {
 				globalCount++
 			} else {
