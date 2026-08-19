@@ -24,6 +24,7 @@ import {
 import {
 	createBuiltinTools,
 	DEFAULT_MODEL_TOOL_ROUTING_RULES,
+	type RunCommandExecutionController,
 	resolveToolPresetName,
 	resolveToolRoutingConfig,
 	type SkillsExecutorWithMetadata,
@@ -141,6 +142,7 @@ function createBuiltinToolsList(
 	skillsExecutor?: SkillsExecutorWithMetadata,
 	executorOverrides?: Partial<ToolExecutors>,
 	telemetry?: ITelemetryService,
+	runCommandExecutionController?: RunCommandExecutionController,
 ): AgentTool[] {
 	const preset = ToolPresets[resolveToolPresetName({ mode })];
 	const toolRoutingConfig = resolveToolRoutingConfig(
@@ -154,6 +156,9 @@ function createBuiltinToolsList(
 		createBuiltinTools({
 			cwd,
 			telemetry,
+			executorOptions: {
+				bash: { executionController: runCommandExecutionController },
+			},
 			...preset,
 			enableSkills: !!skillsExecutor,
 			enableGenerateMedia: !!executorOverrides?.generateMedia,
@@ -505,6 +510,7 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 					undefined,
 					toolExecutors,
 					telemetry ?? config.telemetry,
+					input.runCommandExecutionController,
 				),
 			);
 			if (!normalized.disableMcpSettingsTools) {
@@ -578,6 +584,7 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 													: undefined,
 												toolExecutors,
 												telemetry ?? config.telemetry,
+												input.runCommandExecutionController,
 											),
 											agent,
 										)
@@ -683,6 +690,7 @@ export class DefaultRuntimeBuilder implements RuntimeBuilder {
 									undefined,
 									toolExecutors,
 									telemetry ?? config.telemetry,
+									input.runCommandExecutionController,
 								)
 						: undefined,
 					teammateConfigProvider: delegatedAgentConfigProvider,

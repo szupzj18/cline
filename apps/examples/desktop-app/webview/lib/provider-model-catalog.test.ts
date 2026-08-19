@@ -130,6 +130,13 @@ describe("transcription model selection", () => {
 		).toBe(false);
 		expect(
 			isChatModel({
+				id: "operation-only-whisper",
+				name: "Operation-only Whisper",
+				operation: "transcription",
+			}),
+		).toBe(false);
+		expect(
+			isChatModel({
 				id: "tts",
 				name: "TTS",
 				operation: "speech-generation",
