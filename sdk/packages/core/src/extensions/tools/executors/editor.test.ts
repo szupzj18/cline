@@ -290,4 +290,71 @@ describe("createEditorExecutor", () => {
 			await fs.rm(dir, { recursive: true, force: true });
 		}
 	});
+
+	// A trailing newline makes split() yield a trailing empty element, so lines.length
+	// is one more than the human-visible line count. The validator's max must equal the
+	// documented "line_count + 1" append line (3 for a 2-line file), not lines.length + 1
+	// (4), which splices in a blank line before the trailing empty element.
+	// github.com/cline/cline/issues/13545
+	it("rejects insert_line beyond the append boundary for files with a trailing newline", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "agents-editor-"));
+		const filePath = path.join(dir, "example.txt");
+		await fs.writeFile(filePath, "one\ntwo\n", "utf-8");
+
+		try {
+			const editor = createEditorExecutor();
+
+			await expect(
+				editor(
+					{
+						path: filePath,
+						new_text: "three",
+						insert_line: 4,
+					},
+					dir,
+					{
+						agentId: "agent-1",
+						conversationId: "conv-1",
+						iteration: 1,
+					},
+				),
+			).rejects.toThrow(
+				"Invalid insert_line: 4. insert_line must be a positive one-based boundary line in the range 1-3. Use 3 to append at EOF.",
+			);
+			await expect(fs.readFile(filePath, "utf-8")).resolves.toBe("one\ntwo\n");
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("appends at EOF on the documented line_count + 1 boundary for files with a trailing newline", async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "agents-editor-"));
+		const filePath = path.join(dir, "example.txt");
+		await fs.writeFile(filePath, "one\ntwo\n", "utf-8");
+
+		try {
+			const editor = createEditorExecutor();
+
+			await expect(
+				editor(
+					{
+						path: filePath,
+						new_text: "three",
+						insert_line: 3,
+					},
+					dir,
+					{
+						agentId: "agent-1",
+						conversationId: "conv-1",
+						iteration: 1,
+					},
+				),
+			).resolves.toBe(`Inserted content at line 3 in ${filePath}.`);
+			await expect(fs.readFile(filePath, "utf-8")).resolves.toBe(
+				"one\ntwo\nthree\n",
+			);
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
 });

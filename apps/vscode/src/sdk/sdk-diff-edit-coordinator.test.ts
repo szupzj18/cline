@@ -96,6 +96,23 @@ describe("computeNewEditorContent", () => {
 			"Invalid insert_line: 5. insert_line must be a positive one-based boundary line in the range 1-3. Use 3 to append at EOF.",
 		)
 	})
+
+	// A trailing newline makes split() yield a trailing empty element, so lines.length
+	// is one more than the human-visible line count. The validator's max must equal the
+	// documented "line_count + 1" append line (3 for a 2-line file), not lines.length + 1
+	// (4), which splices in a blank line before the trailing empty element.
+	// github.com/cline/cline/issues/13545
+	it("throws for an out-of-range insert_line on a file with a trailing newline", () => {
+		const input: EditFileInput = { path: filePath, new_text: "three", insert_line: 4 }
+		expect(() => computeNewEditorContent("one\ntwo\n", input, filePath, "modify")).toThrow(
+			"Invalid insert_line: 4. insert_line must be a positive one-based boundary line in the range 1-3. Use 3 to append at EOF.",
+		)
+	})
+
+	it("appends at EOF on the documented line_count + 1 boundary for a file with a trailing newline", () => {
+		const input: EditFileInput = { path: filePath, new_text: "three", insert_line: 3 }
+		expect(computeNewEditorContent("one\ntwo\n", input, filePath, "modify")).toBe("one\ntwo\nthree\n")
+	})
 })
 
 describe("buildEditPreviewAnimation", () => {

@@ -208,7 +208,12 @@ async function insertInFile(
 	const content = await fs.readFile(filePath, encoding);
 	const eol = detectLineEnding(content);
 	const lines = content.split(/\r\n|\n/);
-	const maxBoundaryLine = lines.length + 1;
+	// A trailing newline makes split() yield a trailing empty element, so the
+	// append boundary is lines.length in that case; otherwise it is
+	// lines.length + 1. This keeps the validator's max equal to the
+	// "line_count + 1" the tool description documents, and prevents the max
+	// value from splicing in a blank line before the trailing empty element.
+	const maxBoundaryLine = lines.length + (content.endsWith(eol) ? 0 : 1);
 
 	if (insertLineOneBased < 1 || insertLineOneBased > maxBoundaryLine) {
 		throw new Error(

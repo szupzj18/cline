@@ -381,7 +381,12 @@ export function computeNewEditorContent(
 ): string {
 	if (input.insert_line != null) {
 		const lines = originalContent.split("\n")
-		const maxBoundaryLine = lines.length + 1
+		// A trailing newline makes split() yield a trailing empty element, so the
+		// append boundary is lines.length in that case; otherwise it is
+		// lines.length + 1. This keeps the validator's max equal to the
+		// "line_count + 1" the tool description documents, and prevents the max
+		// value from splicing in a blank line before the trailing empty element.
+		const maxBoundaryLine = lines.length + (originalContent.endsWith("\n") ? 0 : 1)
 		if (input.insert_line < 1 || input.insert_line > maxBoundaryLine) {
 			throw new Error(
 				`Invalid insert_line: ${input.insert_line}. insert_line must be a positive one-based boundary line in the range 1-${maxBoundaryLine}. Use ${maxBoundaryLine} to append at EOF.`,
